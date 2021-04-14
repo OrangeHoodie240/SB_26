@@ -5,7 +5,7 @@ from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
 from forms import UserAddForm, LoginForm, MessageForm, EditProfileForm
-from models import db, connect_db, User, Message, Follows
+from models import db, connect_db, User, Message, Follows, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -39,6 +39,7 @@ def add_user_to_g():
     else:
         g.user = None
 
+
 def do_login(user):
     """Log in user."""
 
@@ -53,8 +54,9 @@ def do_logout():
         session.pop(CURR_USER_KEY)
 
         flash('Logged out sucessfully')
-    
+
     return redirect('/login')
+
 
 @app.route('/signup', methods=["GET", "POST"])
 def signup():
@@ -112,9 +114,31 @@ def login():
     return render_template('users/login.html', form=form)
 
 
-
 ##############################################################################
 # General user routes:
+
+
+@app.route('/users/likes/<int:id>', methods=['POST'])
+def toggle_like(id):
+
+    if CURR_USER_KEY not in session:
+        return redirect('/')
+
+    # if message already liked, unlike and redirect to '/'.
+    like = Likes.query.filter((Likes.user_id == g.user.id) & (Likes.message_id == id)).one_or_none()
+    if like is not None: 
+        Likes.query.filter(Likes.id == like.id).delete() 
+        db.session.commit() 
+
+        return redirect('/')
+
+    # if message not liked, add like and redirect
+    like = Likes(user_id=g.user.id, message_id=id)
+    db.session.add(like)
+    db.session.commit()
+
+    return redirect('/')
+
 
 @app.route('/users')
 def list_users():
@@ -133,6 +157,18 @@ def list_users():
     return render_template('users/index.html', users=users)
 
 
+@app.route('/users/<int:id>/likes', methods=['GET'])
+def likes(id):
+    if CURR_USER_KEY not in session: 
+        return redirect('/')
+
+    message_ids = db.session.query(Likes.message_id).filter(Likes.user_id == g.user.id).all() 
+    message_ids = [id for tup in message_ids for id in tup]
+
+    messages = Message.query.filter(Message.id.in_(message_ids)).all()
+
+    return render_template('users/likes.html', messages=messages)
+
 @app.route('/users/<int:user_id>')
 def users_show(user_id):
     """Show user profile."""
@@ -147,7 +183,9 @@ def users_show(user_id):
                 .order_by(Message.timestamp.desc())
                 .limit(100)
                 .all())
-    return render_template('users/show.html', user=user, messages=messages)
+    
+    like_count = Likes.query.filter(Likes.user_id == g.user.id).count() 
+    return render_template('users/show.html', user=user, messages=messages, like_count=like_count)
 
 
 @app.route('/users/<int:user_id>/following')
@@ -209,27 +247,28 @@ def profile():
     """Update profile for current user."""
     if CURR_USER_KEY not in session:
         return redirect('/')
-    
+
     user = User.query.get_or_404(g.user.id)
     form = EditProfileForm(obj=user)
 
     if form.validate_on_submit():
         password_matches = User.authenticate(user.username, form.password.data)
         if(password_matches):
-            user.username = form.username.data 
-            user.email = form.email.data 
-            user.image_url = form.image_url.data 
-            user.header_image_url = form.header_image_url.data 
-            user.bio = form.bio.data 
+            user.username = form.username.data
+            user.email = form.email.data
+            user.image_url = form.image_url.data
+            user.header_image_url = form.header_image_url.data
+            user.bio = form.bio.data
 
-            db.session.commit() 
+            db.session.commit()
             return redirect(f'/users/{user.id}')
 
         else:
             flash("Invalid password")
             return render_template('users/edit.html', form=form)
-        
+
     return render_template('users/edit.html', form=form)
+
 
 @app.route('/users/delete', methods=["POST"])
 def delete_user():
@@ -309,17 +348,22 @@ def homepage():
     """
 
     if g.user:
-        
+
         # get all ids from users being followed
-        ids = db.session.query(Follows.user_being_followed_id).filter(Follows.user_following_id == g.user.id).all()
+        ids = db.session.query(Follows.user_being_followed_id).filter(
+            Follows.user_following_id == g.user.id).all()
         # flatten from a list of tuples of ids to a list of ids
         ids = [id for tup in ids for id in tup]
         # add the current user
-        ids.append(g.user.id) 
+        ids.append(g.user.id)
 
-        messages = Message.query.filter(Message.user_id.in_(ids)).order_by(Message.timestamp.desc()).limit(100).all()
+        messages = Message.query.filter(Message.user_id.in_(ids)).order_by(
+            Message.timestamp.desc()).limit(100).all()
 
-        return render_template('home.html', messages=messages)
+        likes = db.session.query(Likes.message_id).filter(Likes.user_id==g.user.id).all() 
+        likes = [id for tup in likes for id in tup]
+
+        return render_template('home.html', messages=messages, likes=likes)
 
     else:
         return render_template('home-anon.html')

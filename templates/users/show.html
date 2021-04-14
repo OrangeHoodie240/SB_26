@@ -1,4 +1,13 @@
 {% extends 'users/detail.html' %}
+
+{% block bio %}
+  Bio: {{ user.bio }}
+{% endblock %}
+
+{% block location %}
+  Location: {{ user.location }}
+{% endblock %}
+
 {% block user_details %}
   <div class="col-sm-6">
     <ul class="list-group" id="messages">
@@ -23,4 +32,5 @@
 
     </ul>
   </div>
+
 {% endblock %}
